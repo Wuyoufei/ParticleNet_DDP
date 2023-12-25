@@ -10,7 +10,7 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 from torchsummary import summary
-import my_pn_load
+import my_Dataset_PN
 import my_ParticleNet
 import my_tools_PN
 import numpy as np
@@ -32,42 +32,46 @@ finally:
 #Please change the hyperparameters here...
     GPU_NUM=torch.cuda.device_count()
     PROCESS=['Hbb','Hcc', 'Hgg', 'Hww', 'Hzz', 'Pll', 'Pww_l', 'Pzz_l', 'Pzz_sl']
-    NUM_DATA_EACH_CLASS=300_000
+    FEATURES=['pfc_truth_PID','pfc_E','pfc_D0','pfc_DZ','pfc_CosTheta','pfc_Phi']
+    POINTS_FEATURES=['pfc_CosTheta','pfc_Phi']
+    NUM_DATA_EACH_CLASS=300_0
     TRAIN_VAL_TEST=[0.8,0.1,0.1]
-    EPOCHS=200
+    EPOCHS=20
     BATCHSIZE=512
     LR=0.001
     USE_FTS_BN=True
-    CONV_PARAMS=[(7, (32, 32, 32)), (7, (64, 64, 64))]
-    FC_PARAMS=[(128, 0.1)]
+    CONV_PARAMS=[(7, (32, 32, 32)), (7, (32, 64, 64))]
+    FC_PARAMS=[(128, 0.5)]
     USE_COUNTS=True
     USE_FUSION=False
     NUM_CLASSES=len(PROCESS)
 #########################################################################################################
 #print info
 print(f'''
-suffix:        {SUFFIX}
-# gpu          {GPU_NUM}
-classes:       {NUM_CLASSES}
-# each class   {NUM_DATA_EACH_CLASS}
-train_val_test:{TRAIN_VAL_TEST}
-epochs:        {EPOCHS}
-batchsize:     {BATCHSIZE}
-lr:            {LR}
-use_fts_bn:    {USE_FTS_BN}
-conv_params:   {CONV_PARAMS}
-fc_params:     {FC_PARAMS}
-use_counts     {USE_COUNTS}
-use_fusion     {USE_FUSION}
+suffix:         {SUFFIX}
+# gpu           {GPU_NUM}
+classes:        {NUM_CLASSES}
+features:       {FEATURES}
+points_features:{POINTS_FEATURES}
+# each class    {NUM_DATA_EACH_CLASS}
+train_val_test: {TRAIN_VAL_TEST}
+epochs:         {EPOCHS}
+batchsize:      {BATCHSIZE}
+lr:             {LR}
+use_fts_bn:     {USE_FTS_BN}
+conv_params:    {CONV_PARAMS}
+fc_params:      {FC_PARAMS}
+use_counts      {USE_COUNTS}
+use_fusion      {USE_FUSION}
         ''')
-def main(local_rank, num_point_feature, train_set, val_set, test_set,):
+def main(local_rank, train_set, val_set, test_set):
     DDP_Config.init_ddp(local_rank)
 
     #########################################################################################################    
                                                 #dataloader
-        
-    input_shape_for_one_event=train_set[0][0].shape
-    feature_dim=input_shape_for_one_event[0]
+    points_shape_for_one_event=train_set[0][0].shape    #(coordinates, particles)
+    features_shape_for_one_event=train_set[0][1].shape  #(features_dim, particles)
+    feature_dim=features_shape_for_one_event[0]         #int
 
     train_sampler=data.DistributedSampler(train_set)
     val_sampler=data.DistributedSampler(val_set)
@@ -94,10 +98,10 @@ def main(local_rank, num_point_feature, train_set, val_set, test_set,):
     if local_rank==0:
         writer=SummaryWriter(f'output/log_tensorboard/log_{SUFFIX}')
         print(f'TensorBoard log path is {os.getcwd()}/output/log_tensorboard/log_{SUFFIX}')
-        writer.add_graph(net,input_to_model=[torch.rand(1,num_point_feature,input_shape_for_one_event[1]).to(local_rank),
-                                             torch.rand(1,*input_shape_for_one_event).to(local_rank)])
+        writer.add_graph(net,input_to_model=[torch.rand(1,*points_shape_for_one_event).to(local_rank),
+                                             torch.rand(1,*features_shape_for_one_event).to(local_rank)])
         
-        print(summary(net,input_size=[(num_point_feature,input_shape_for_one_event[1]),input_shape_for_one_event]))#list of tuple when input is multi-dim
+        print(summary(net,input_size=[points_shape_for_one_event,features_shape_for_one_event]))#list of tuple when input is multi-dim
 
     net=nn.parallel.DistributedDataParallel(net,device_ids=[local_rank])
 
@@ -111,8 +115,8 @@ def main(local_rank, num_point_feature, train_set, val_set, test_set,):
     for epoch in range(EPOCHS):
         train_set.sampler.set_epoch(epoch) #Essential!!! Otherwize each GPU only get same ntuples every epoch
         #train_sampler.set_epoch(epoch)    #Same as the above, both are correct
-        loss_train,acc_train=my_tools_PN.train_procedure_in_each_epoch(net,train_set,loss,optimizer,num_point_feature,local_rank)
-        loss_val,acc_val=my_tools_PN.evaluate_accuracy(net,loss,val_set,num_point_feature,test=False)
+        loss_train,acc_train=my_tools_PN.train_procedure_in_each_epoch(net,train_set,loss,optimizer,local_rank)
+        loss_val,acc_val=my_tools_PN.evaluate_accuracy(net,loss,val_set,test=False)
 
         if local_rank==0:
             writer.add_scalars('Metric',{'loss_train':loss_train,
@@ -129,7 +133,7 @@ def main(local_rank, num_point_feature, train_set, val_set, test_set,):
 
     if local_rank==0:
         my_tools_PN.save_net(net,SUFFIX)
-        score,true_label,loss_test,acc_test=my_tools_PN.evaluate_accuracy(net,loss,test_set,num_point_feature,test=True)
+        score,true_label,loss_test,acc_test=my_tools_PN.evaluate_accuracy(net,loss,test_set,test=True)
         print('{:-^80}'.format(f'loss in test is {loss_test:.3f}, accuracy in test is {acc_test:.3f},'))
         score_label=torch.argmax(score,dim=1)
         true_label=true_label.cpu().numpy()     #1d
@@ -144,10 +148,10 @@ def main(local_rank, num_point_feature, train_set, val_set, test_set,):
 if __name__=='__main__':
 
     fimename=[i +'.root' for i in PROCESS]
-    dataset,num_point_feature=my_pn_load.load(filename=fimename,num_data=NUM_DATA_EACH_CLASS)
+    dataset=my_Dataset_PN.my_PN_Dataset(fimename,NUM_DATA_EACH_CLASS,FEATURES,POINTS_FEATURES)
     train_set,val_set,test_set=data.random_split(dataset=dataset,lengths=TRAIN_VAL_TEST)
     
-    mp.spawn(main,args=(num_point_feature,train_set, val_set, test_set), nprocs=GPU_NUM)
+    mp.spawn(main,args=(train_set, val_set, test_set), nprocs=GPU_NUM)
 
     print('Program Is Over !!!')
 

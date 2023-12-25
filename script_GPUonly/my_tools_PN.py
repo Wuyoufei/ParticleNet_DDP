@@ -3,29 +3,29 @@
 #   \ \ /\ / /    / /  | |_   
 #    \ V  V /    / /_  |  _|  
 #     \_/\_/    /____| |_|    
-#            PFN                        
+#            PN                        
 r"""
-try_gpu(i=0) 
+1.try_gpu(i=0) 
 
-initialize_pfn(m)
+2.initialize_pfn(m)
 
-one_hot_encoding(true_label)
+3.one_hot_encoding(true_label)
 
-class Accumulator
+4.class Accumulator
 
-accuracy(y_hat, y)
+5.accuracy(y_hat, y)
 
-evaluate_accuracy(net, loss, data_iter, device,test=False)
+6.evaluate_accuracy(net, loss, data_iter, device,test=False)
 
-train_procedure_in_each_epoch(net,tran_set,loss,optimizer,device)
+7.train_procedure_in_each_epoch(net,tran_set,loss,optimizer,device)
 
-plot_confusion_matrix(id, n, y_true, y_pred, classes="", normalize=True, cmap=plt.cm.Greens)
+8.plot_confusion_matrix(id, n, y_true, y_pred, classes="", normalize=True, cmap=plt.cm.Greens)
 
-remap_pids(events, pid_i=0, error_on_unknown=True)
+9.remap_pids(events, pid_i=0, error_on_unknown=True)
 
-save_net(net,suffix)
+10.save_net(net,suffix)
 
-plot_roc(id, n_classes, y_test, y_score, classes='')
+11.plot_roc(id, n_classes, y_test, y_score, classes='')
 """                   
 import torch
 import torch.nn.functional as F
@@ -113,7 +113,7 @@ def accuracy(y_hat, y):
 
 
 
-def evaluate_accuracy(net, loss, data_iter,num_point_feature,test=False):  
+def evaluate_accuracy(net, loss, data_iter,test=False):  
     #caculate the accuracy on specified dataset
     if isinstance(net, torch.nn.Module):
         net.eval()  #Essential!
@@ -121,9 +121,8 @@ def evaluate_accuracy(net, loss, data_iter,num_point_feature,test=False):
     y_pred_test=[]
     y_true_test=[]
     with torch.no_grad():
-        for X, y in data_iter:
-            X,y=X.cuda(),y.cuda()
-            points=X[:,-num_point_feature:,:]   #It's new in PN, need points
+        for points,X, y in data_iter:#It's new in PN, need points
+            points,X,y=points.cuda(),X.cuda(),y.cuda() 
             y_hat=net(points,X) #It's new in PN, need points
             l=loss(y_hat,y)
             metric.add(l.sum(), accuracy(y_hat, y), torch.tensor(y.numel()).cuda())
@@ -143,15 +142,14 @@ def evaluate_accuracy(net, loss, data_iter,num_point_feature,test=False):
         #loss, acc 
         return metric[0] / metric[2], metric[1] / metric[2]
 
-def train_procedure_in_each_epoch(net,tran_set,loss,optimizer,num_point_feature,local_rank):
+def train_procedure_in_each_epoch(net,tran_set,loss,optimizer,local_rank):
     #sum_of_loss_of_all_events, sum_of_the_number_of_correct_predictions, all_events
     metric=Accumulator(3)
     if local_rank==0:
         pbar=tqdm(tran_set)
     net.train()
-    for X, y in tran_set:
-        X,y=X.cuda(),y.cuda()
-        points=X[:,-num_point_feature:,:] #It's new in PN, need points
+    for points,X, y in tran_set:#It's new in PN, need points
+        points,X,y=points.cuda(),X.cuda(),y.cuda()
         optimizer.zero_grad()
         y_hat=net(points,X) #It's new in PN, need points
         l=loss(y_hat,y)

@@ -57,7 +57,7 @@ class EdgeConvBlock(nn.Module):
     <https://arxiv.org/pdf/1801.07829>`__".  Can be described as follows:
     .. math::
        x_i^{(l+1)} = \max_{j \in \mathcal{N}(i)} \mathrm{ReLU}(
-       \Theta \cdot (x_j^{(l)} - x_i^{(l)}) + \Phi \cdot x_i^{(l)})
+       \Theta \cdot (x_j^{(l)} - x_i^{(l)}) + \Phi \cdot x_i^{(l)})       Why max? it's mean in this code...
     where :math:`\mathcal{N}(i)` is the neighbor of :math:`i`.
     Parameters
     ----------
